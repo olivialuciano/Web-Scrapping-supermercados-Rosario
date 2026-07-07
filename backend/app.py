@@ -55,7 +55,49 @@ def health():
         "status": "ok",
         "message": "API de supermercados funcionando"
     })
+    
+@app.get("/api/debug/chrome")
+def debug_chrome():
+    from scraper import start_market_browser, safe_kill_browser
+    import os
+    import subprocess
+    import traceback
 
+    try:
+        chromium_version = subprocess.check_output(
+            ["chromium", "--version"],
+            text=True
+        ).strip()
+
+        chromedriver_version = subprocess.check_output(
+            ["chromedriver", "--version"],
+            text=True
+        ).strip()
+
+        driver = start_market_browser("https://example.com")
+        title = driver.title
+
+        safe_kill_browser()
+
+        return jsonify({
+            "status": "ok",
+            "chromium_version": chromium_version,
+            "chromedriver_version": chromedriver_version,
+            "title": title,
+            "chrome_bin": os.environ.get("CHROME_BIN"),
+            "chromedriver_path": os.environ.get("CHROMEDRIVER_PATH")
+        })
+
+    except Exception as error:
+        safe_kill_browser()
+
+        return jsonify({
+            "status": "error",
+            "message": str(error),
+            "trace": traceback.format_exc(),
+            "chrome_bin": os.environ.get("CHROME_BIN"),
+            "chromedriver_path": os.environ.get("CHROMEDRIVER_PATH")
+        }), 500
 
 @app.get("/api/zones")
 def get_zones():

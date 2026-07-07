@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 import uuid
 import traceback
@@ -20,9 +21,7 @@ def build_chrome_options():
     options = Options()
 
     chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
-
-    if chrome_binary:
-        options.binary_location = chrome_binary
+    options.binary_location = chrome_binary
 
     unique_id = str(uuid.uuid4())
 
@@ -43,9 +42,9 @@ def build_chrome_options():
 
     options.add_argument("--window-size=1366,900")
     options.add_argument("--lang=es-AR")
+    options.add_argument("--remote-debugging-port=9222")
 
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-setuid-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-software-rasterizer")
@@ -55,9 +54,8 @@ def build_chrome_options():
     options.add_argument("--disable-default-apps")
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-features=VizDisplayCompositor")
     options.add_argument("--no-first-run")
-    options.add_argument("--no-zygote")
-    options.add_argument("--single-process")
 
     options.add_argument("--disable-blink-features=AutomationControlled")
 
@@ -73,9 +71,15 @@ def build_chrome_options():
     return options
 
 def start_market_browser(url: str):
-    chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
+    chromedriver_path = os.environ.get(
+        "CHROMEDRIVER_PATH",
+        "/usr/bin/chromedriver"
+    )
 
-    service = Service(chromedriver_path)
+    service = Service(
+        executable_path=chromedriver_path,
+        log_output=sys.stdout
+    )
 
     driver = webdriver.Chrome(
         service=service,
