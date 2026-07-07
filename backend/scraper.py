@@ -9,24 +9,27 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.keys import Keys
 
 import helium as he
 
 
 HEADLESS = True
-DEFAULT_TIMEOUT = 22
-RESULTS_TIMEOUT = 24
-SHORT_TIMEOUT = 3
+
+MARKET_TIMEOUT_SECONDS = 20
+PAGE_LOAD_TIMEOUT_SECONDS = 7
+INPUT_TIMEOUT_SECONDS = 5
+RESULTS_TIMEOUT_SECONDS = 7
+COOKIE_TIMEOUT_SECONDS = 1.2
+POLL_SECONDS = 0.2
 
 
 def build_chrome_options():
     options = Options()
+    options.page_load_strategy = "eager"
 
     chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
     options.binary_location = chrome_binary
-    options.page_load_strategy = "eager"
 
     unique_id = str(uuid.uuid4())
     user_data_dir = f"/tmp/chrome-user-data-{unique_id}"
@@ -45,11 +48,15 @@ def build_chrome_options():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-popup-blocking")
     options.add_argument("--no-first-run")
     options.add_argument("--no-default-browser-check")
     options.add_argument("--window-size=1366,900")
     options.add_argument("--lang=es-AR")
-
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     options.add_argument(
@@ -61,19 +68,25 @@ def build_chrome_options():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
+    options.add_experimental_option(
+        "prefs",
+        {
+            "profile.managed_default_content_settings.images": 2,
+            "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_setting_values.geolocation": 2,
+        }
+    )
+
     return options
 
 
 def start_market_browser(url: str):
-    driver = webdriver.Chrome(
-        options=build_chrome_options()
-    )
-
+    driver = webdriver.Chrome(options=build_chrome_options())
     he.set_driver(driver)
 
     driver.set_window_size(1366, 900)
-    driver.set_page_load_timeout(45)
-    driver.implicitly_wait(0)
+    driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
+    driver.set_script_timeout(5)
 
     try:
         driver.execute_cdp_cmd(
@@ -89,8 +102,13 @@ def start_market_browser(url: str):
     except Exception:
         pass
 
-    driver.get(url)
-    wait_for_dom_ready(timeout=12)
+    try:
+        driver.get(url)
+    except TimeoutException:
+        try:
+            driver.execute_script("window.stop();")
+        except Exception:
+            pass
 
     return driver
 
@@ -144,7 +162,6 @@ def normalize_price(price_text: str) -> Optional[float]:
         return None
 
     text = clean_text(price_text)
-
     matches = re.findall(r"\$?\s*[\d\.]+,\d{2}|\$?\s*[\d\.]+", text)
 
     if not matches:
@@ -173,9 +190,7 @@ def relevance_score(query: str, product_name: str) -> int:
     if query in product_name:
         score += 50
 
-    query_words = query.split()
-
-    for word in query_words:
+    for word in query.split():
         if word in product_name:
             score += 10
 
@@ -234,71 +249,81 @@ def get_driver():
     return he.get_driver()
 
 
-def wait_for_dom_ready(timeout: int = 12):
+def safe_kill_browser():
     try:
-        driver = get_driver()
-        WebDriverWait(driver, timeout).until(
-            lambda current_driver: current_driver.execute_script(
-                "return document.readyState"
-            ) in ["interactive", "complete"]
-        )
+        he.kill_browser()
     except Exception:
         pass
 
 
-def wait_for_css(selector: str, timeout: int = DEFAULT_TIMEOUT):
-    driver = get_driver()
-
-    return WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-    )
+def market_deadline():
+    return time.monotonic() + MARKET_TIMEOUT_SECONDS
 
 
-def wait_for_clickable_css(selector: str, timeout: int = DEFAULT_TIMEOUT):
-    driver = get_driver()
-
-    return WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-    )
+def seconds_left(deadline) -> float:
+    return max(0, deadline - time.monotonic())
 
 
-def wait_for_any_css(selectors: List[str], timeout: int = DEFAULT_TIMEOUT):
-    driver = get_driver()
+def remaining_time(deadline, fallback: float = 1) -> float:
+    left = seconds_left(deadline)
 
-    def find_any(current_driver):
-        for selector in selectors:
-            elements = current_driver.find_elements(By.CSS_SELECTOR, selector)
+    if left <= 0:
+        raise TimeoutError(
+            f"El supermercado superó el máximo de {MARKET_TIMEOUT_SECONDS} segundos."
+        )
 
-            if elements:
-                return elements[0]
+    return max(0.2, min(float(fallback), left))
 
+
+def is_visible(element) -> bool:
+    try:
+        return element.is_displayed()
+    except Exception:
         return False
 
-    return WebDriverWait(driver, timeout).until(find_any)
+
+def wait_selector_fast(selector: str, deadline, timeout: float = INPUT_TIMEOUT_SECONDS):
+    driver = get_driver()
+    end_time = time.monotonic() + remaining_time(deadline, timeout)
+
+    while time.monotonic() < end_time:
+        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+
+        for element in elements:
+            if is_visible(element):
+                return element
+
+        time.sleep(POLL_SECONDS)
+
+    raise TimeoutError(f"No apareció el selector {selector}.")
 
 
-def wait_for_result_count(
-    selector: str,
-    min_count: int = 1,
-    timeout: int = RESULTS_TIMEOUT
+def wait_for_results(
+    selectors: List[str],
+    deadline,
+    timeout: float = RESULTS_TIMEOUT_SECONDS
 ) -> bool:
     driver = get_driver()
+    end_time = time.monotonic() + remaining_time(deadline, timeout)
 
-    def has_results(current_driver):
-        elements = current_driver.find_elements(By.CSS_SELECTOR, selector)
-        visible_elements = [element for element in elements if element.is_displayed()]
+    while time.monotonic() < end_time:
+        for selector in selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, selector)
 
-        return len(visible_elements) >= min_count
+                visible_elements = [
+                    element for element in elements
+                    if is_visible(element) and clean_text(element.text)
+                ]
 
-    WebDriverWait(driver, timeout).until(has_results)
-    return True
+                if visible_elements:
+                    return True
+            except Exception:
+                pass
 
+        time.sleep(POLL_SECONDS)
 
-def wait_for_results_or_continue(selector: str, timeout: int = RESULTS_TIMEOUT) -> bool:
-    try:
-        return wait_for_result_count(selector, min_count=1, timeout=timeout)
-    except TimeoutException:
-        return False
+    return False
 
 
 def get_selector_text(selector: str, index: int) -> str:
@@ -309,21 +334,62 @@ def get_selector_text(selector: str, index: int) -> str:
         if index >= len(elements):
             return ""
 
-        return elements[index].text
+        return clean_text(elements[index].text)
     except Exception:
         return ""
 
 
 def write_search_and_submit(search_input, product: str):
-    he.click(search_input)
-
     try:
-        search_input.web_element.clear()
+        search_input.click()
     except Exception:
         pass
 
-    he.write(product, into=search_input)
-    he.press(he.ENTER)
+    try:
+        search_input.clear()
+    except Exception:
+        pass
+
+    search_input.send_keys(product)
+    search_input.send_keys(Keys.ENTER)
+
+
+def close_cookies_banner(deadline=None):
+    selectors = [
+        ".onetrust-close-btn-handler",
+        "#onetrust-accept-btn-handler",
+        ".banner-close-button",
+        ".ot-close-icon",
+        "button[aria-label='close']",
+        "button[aria-label='Cerrar']",
+    ]
+
+    try:
+        driver = get_driver()
+    except Exception:
+        return
+
+    end_time = time.monotonic() + COOKIE_TIMEOUT_SECONDS
+
+    if deadline is not None:
+        end_time = min(end_time, deadline)
+
+    while time.monotonic() < end_time:
+        for selector in selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+
+                for element in elements:
+                    if is_visible(element):
+                        try:
+                            element.click()
+                            return
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        time.sleep(POLL_SECONDS)
 
 
 def get_image_src_from_element(element) -> str:
@@ -350,7 +416,6 @@ def get_image_src_from_element(element) -> str:
 
             if value and not value.startswith("data:image"):
                 return value
-
         except Exception:
             pass
 
@@ -371,7 +436,6 @@ def get_image_src_from_element(element) -> str:
 
             if image_url:
                 return image_url
-
     except Exception:
         pass
 
@@ -402,14 +466,12 @@ def find_product_image_url(
 
                 if image_url:
                     return image_url
-
         except Exception:
             pass
 
     for image_selector in image_selectors:
         try:
             images = driver.find_elements(By.CSS_SELECTOR, image_selector)
-
             valid_urls = []
 
             for image in images:
@@ -421,7 +483,6 @@ def find_product_image_url(
 
             if index < len(valid_urls):
                 return valid_urls[index]
-
         except Exception:
             pass
 
@@ -450,52 +511,21 @@ def build_result(
     }
 
 
-def safe_kill_browser():
-    try:
-        he.kill_browser()
-    except Exception:
-        pass
-
-
-def wait_selector(selector: str, timeout: int = DEFAULT_TIMEOUT):
-    wait_for_css(selector, timeout=timeout)
-    return he.S(selector)
-
-
-def close_cookies_banner():
-    selectors = [
-        ".onetrust-close-btn-handler",
-        "#onetrust-accept-btn-handler",
-        ".banner-close-button",
-        ".ot-close-icon",
-    ]
-
-    for selector in selectors:
-        try:
-            wait_for_clickable_css(selector, timeout=SHORT_TIMEOUT)
-            button = he.S(selector)
-
-            if button.exists():
-                he.click(button)
-                return
-
-        except Exception:
-            pass
-
-
 def scrape_la_gallega(product: str, limit: int = 3) -> List[Dict]:
     supermarket = "La Gallega"
     url = "https://www.lagallega.com.ar/login.asp"
     results = []
 
     try:
-        start_market_browser(url)
-        close_cookies_banner()
+        deadline = market_deadline()
 
-        search_input = wait_selector("#cpoBuscar")
+        start_market_browser(url)
+        close_cookies_banner(deadline)
+
+        search_input = wait_selector_fast("#cpoBuscar", deadline)
         write_search_and_submit(search_input, product)
 
-        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
+        wait_for_results([".desc", ".izq"], deadline)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -543,13 +573,15 @@ def scrape_la_reina(product: str, limit: int = 3) -> List[Dict]:
     results = []
 
     try:
-        start_market_browser(url)
-        close_cookies_banner()
+        deadline = market_deadline()
 
-        search_input = wait_selector("#cpoBuscar")
+        start_market_browser(url)
+        close_cookies_banner(deadline)
+
+        search_input = wait_selector_fast("#cpoBuscar", deadline)
         write_search_and_submit(search_input, product)
 
-        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
+        wait_for_results([".desc", ".izq"], deadline)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -597,13 +629,15 @@ def scrape_dar(product: str, limit: int = 3) -> List[Dict]:
     results = []
 
     try:
-        start_market_browser(url)
-        close_cookies_banner()
+        deadline = market_deadline()
 
-        search_input = wait_selector("#cpoBuscar")
+        start_market_browser(url)
+        close_cookies_banner(deadline)
+
+        search_input = wait_selector_fast("#cpoBuscar", deadline)
         write_search_and_submit(search_input, product)
 
-        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
+        wait_for_results([".desc", ".izq"], deadline)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -651,16 +685,17 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
     results = []
 
     try:
-        start_market_browser(url)
-        close_cookies_banner()
+        deadline = market_deadline()
 
-        search_input = wait_selector("#cio-autocomplete-0-input")
+        start_market_browser(url)
+        close_cookies_banner(deadline)
+
+        search_input = wait_selector_fast("#cio-autocomplete-0-input", deadline)
         write_search_and_submit(search_input, product)
 
-        wait_for_results_or_continue(".nombre-producto", timeout=RESULTS_TIMEOUT)
+        wait_for_results([".nombre-producto", ".card-title"], deadline)
 
         try:
-            he.scroll_down(400)
             he.scroll_down(400)
         except Exception:
             pass
@@ -710,19 +745,20 @@ def scrape_jumbo(product: str, limit: int = 3) -> List[Dict]:
     results = []
 
     try:
-        start_market_browser(url)
-        close_cookies_banner()
+        deadline = market_deadline()
 
-        search_input = wait_selector(".vtex-styleguide-9-x-input")
+        start_market_browser(url)
+        close_cookies_banner(deadline)
+
+        search_input = wait_selector_fast(".vtex-styleguide-9-x-input", deadline)
         write_search_and_submit(search_input, product)
 
-        wait_for_results_or_continue(
-            ".vtex-product-summary-2-x-productBrand",
-            timeout=RESULTS_TIMEOUT
+        wait_for_results(
+            [".vtex-product-summary-2-x-productBrand", ".productPrice"],
+            deadline
         )
 
         try:
-            he.scroll_down(400)
             he.scroll_down(400)
         except Exception:
             pass

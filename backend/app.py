@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
 import json
@@ -10,8 +11,30 @@ from scraper import ZONES, SCRAPERS, MARKET_NAMES
 app = Flask(__name__)
 CORS(app)
 
-
 START_TIME = time.time()
+MARKET_TIMEOUT_SECONDS = 20
+
+
+def run_scraper_with_timeout(scraper, product, limit, market_name):
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(scraper, product, limit)
+
+    try:
+        return future.result(timeout=MARKET_TIMEOUT_SECONDS)
+
+    except FutureTimeout:
+        try:
+            from scraper import safe_kill_browser
+            safe_kill_browser()
+        except Exception:
+            pass
+
+        raise TimeoutError(
+            f"{market_name} tardó más de {MARKET_TIMEOUT_SECONDS} segundos."
+        )
+
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def sse_event(event_name, data):
@@ -81,7 +104,7 @@ def health():
 def warmup():
     """
     Endpoint liviano para que el frontend despierte Render apenas carga la web.
-    No abre Chrome ni ejecuta scraping: solo responde rápido y mantiene viva la API.
+    No abre Chrome ni ejecuta scraping.
     """
     uptime_seconds = round(time.time() - START_TIME, 2)
 
@@ -162,16 +185,20 @@ def get_zones():
     })
 
 
+def parse_limit(raw_limit):
+    try:
+        limit = int(raw_limit)
+    except ValueError:
+        limit = 3
+
+    return max(1, min(limit, 5))
+
+
 @app.get("/api/search-stream")
 def search_stream():
     product = request.args.get("product", "").strip()
     zone = request.args.get("zone", "Q").strip().upper()
-    limit = request.args.get("limit", "3")
-
-    try:
-        limit = int(limit)
-    except ValueError:
-        limit = 3
+    limit = parse_limit(request.args.get("limit", "3"))
 
     if not product:
         return jsonify({
@@ -233,7 +260,13 @@ def search_stream():
                 continue
 
             try:
-                market_results = scraper(product, limit=limit)
+                market_results = run_scraper_with_timeout(
+                    scraper=scraper,
+                    product=product,
+                    limit=limit,
+                    market_name=market_name
+                )
+
                 all_results.extend(market_results)
 
                 if len(market_results) == 0:
@@ -285,17 +318,12 @@ def search_stream():
 @app.get("/api/search")
 def search():
     """
-    Endpoint viejo/simple.
-    Lo podés dejar por si querés una búsqueda sin progreso.
+    Endpoint simple sin progreso.
+    Lo podés dejar por si querés una búsqueda sin SSE.
     """
     product = request.args.get("product", "").strip()
     zone = request.args.get("zone", "Q").strip().upper()
-    limit = request.args.get("limit", "3")
-
-    try:
-        limit = int(limit)
-    except ValueError:
-        limit = 3
+    limit = parse_limit(request.args.get("limit", "3"))
 
     if not product:
         return jsonify({
@@ -317,9 +345,29 @@ def search():
         scraper = SCRAPERS.get(market_key)
         market_name = MARKET_NAMES.get(market_key, market_key)
 
+        if scraper is None:
+            errors.append({
+                "supermarket": market_name,
+                "message": "No hay scraper configurado para este supermercado."
+            })
+            continue
+
         try:
-            market_results = scraper(product, limit=limit)
+            market_results = run_scraper_with_timeout(
+                scraper=scraper,
+                product=product,
+                limit=limit,
+                market_name=market_name
+            )
+
             all_results.extend(market_results)
+
+            if len(market_results) == 0:
+                errors.append({
+                    "supermarket": market_name,
+                    "message": "No se encontraron resultados."
+                })
+
         except Exception as error:
             errors.append({
                 "supermarket": market_name,
@@ -338,4 +386,9 @@ def search():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=5000,
+        threaded=True
+    )
