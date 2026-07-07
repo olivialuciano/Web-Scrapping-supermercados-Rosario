@@ -102,17 +102,14 @@ function App() {
     const trimmedProduct = product.trim();
 
     if (!trimmedProduct) {
-      setErrorMessage("Ingresá un producto para buscar.");
       return;
     }
 
     setLoading(true);
-    setErrorMessage("");
     setData(null);
 
     setProgressImmediately(0);
     setProgressMessage("Preparando búsqueda...");
-    setCurrentMarket("");
     setFinishedMarkets(0);
     setTotalMarkets(0);
 
@@ -134,7 +131,6 @@ function App() {
       const total = payload.total_markets ?? 0;
 
       setProgressMessage(payload.message ?? "");
-      setCurrentMarket(payload.current_market ?? "");
       setFinishedMarkets(finished);
       setTotalMarkets(total);
 
