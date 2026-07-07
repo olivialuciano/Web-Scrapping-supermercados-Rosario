@@ -712,17 +712,31 @@ def scrape_dar(product: str, limit: int = 3) -> List[Dict]:
 
 def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
     supermarket = "Coto"
-    url = "https://www.cotodigital.com.ar/sitios/cdigi/nuevositio"
     results = []
+
+    def build_coto_slug(text: str) -> str:
+        import unicodedata
+
+        normalized = unicodedata.normalize("NFKD", text)
+        normalized = "".join(
+            char for char in normalized
+            if not unicodedata.combining(char)
+        )
+
+        normalized = normalized.lower().strip()
+        normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
+        normalized = normalized.strip("-")
+
+        return normalized
+
+    product_slug = build_coto_slug(product)
+    url = f"https://www.coto.com.ar/productos/{product_slug}"
 
     try:
         deadline = market_deadline()
 
         start_market_browser(url)
         close_cookies_banner(deadline)
-
-        search_input = wait_selector_fast("#cio-autocomplete-0-input", deadline)
-        write_search_and_submit(search_input, product)
 
         wait_for_results([".nombre-producto", ".card-title"], deadline)
 
@@ -748,7 +762,10 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
                     "article",
                 ],
                 image_selectors=[
-                    ".product-image"
+                    ".product-image",
+                    ".product-image img",
+                    "article img",
+                    "img",
                 ]
             )
 
@@ -772,17 +789,22 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
 
 def scrape_jumbo(product: str, limit: int = 3) -> List[Dict]:
     supermarket = "Jumbo"
-    url = "https://www.jumbo.com.ar/"
     results = []
+
+    def build_jumbo_url_query(text: str) -> str:
+        from urllib.parse import quote
+
+        cleaned = clean_text(text).lower()
+        return quote(cleaned, safe="")
+
+    product_query = build_jumbo_url_query(product)
+    url = f"https://www.jumbo.com.ar/{product_query}"
 
     try:
         deadline = market_deadline()
 
         start_market_browser(url)
         close_cookies_banner(deadline)
-
-        search_input = wait_selector_fast(".vtex-styleguide-9-x-input", deadline)
-        write_search_and_submit(search_input, product)
 
         wait_for_results(
             [".vtex-product-summary-2-x-productBrand", ".productPrice"],
