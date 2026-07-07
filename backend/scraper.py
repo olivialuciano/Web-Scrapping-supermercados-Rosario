@@ -1,11 +1,13 @@
 import os
-
 import re
 import time
+import uuid
 import traceback
 from typing import Dict, List, Optional
 
+from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 import helium as he
@@ -17,27 +19,52 @@ HEADLESS = True
 def build_chrome_options():
     options = Options()
 
-    chrome_binary = os.environ.get("CHROME_BIN")
+    chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
 
     if chrome_binary:
         options.binary_location = chrome_binary
-    
+
+    unique_id = str(uuid.uuid4())
+
+    user_data_dir = f"/tmp/chrome-user-data-{unique_id}"
+    data_path = f"/tmp/chrome-data-{unique_id}"
+    cache_dir = f"/tmp/chrome-cache-{unique_id}"
+
+    os.makedirs(user_data_dir, exist_ok=True)
+    os.makedirs(data_path, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
+
     if HEADLESS:
         options.add_argument("--headless=new")
 
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument(f"--data-path={data_path}")
+    options.add_argument(f"--disk-cache-dir={cache_dir}")
+
     options.add_argument("--window-size=1366,900")
-    options.add_argument("--start-maximized")
     options.add_argument("--lang=es-AR")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-dev-shm-usage")
+
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-setuid-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-zygote")
+    options.add_argument("--single-process")
+
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/149.0.0.0 Safari/537.36"
+        "Chrome/120.0.0.0 Safari/537.36"
     )
 
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -45,11 +72,17 @@ def build_chrome_options():
 
     return options
 
-
 def start_market_browser(url: str):
-    driver = he.start_chrome(
+    chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
+
+    service = Service(chromedriver_path)
+
+    driver = webdriver.Chrome(
+        service=service,
         options=build_chrome_options()
     )
+
+    he.set_driver(driver)
 
     driver.set_window_size(1366, 900)
 
