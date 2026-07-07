@@ -15,7 +15,7 @@ from selenium.webdriver.common.keys import Keys
 import helium as he
 
 
-HEADLESS = True
+HEADLESS = False
 
 MARKET_TIMEOUT_SECONDS = 40
 PAGE_LOAD_TIMEOUT_SECONDS = 7
