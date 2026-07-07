@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 
 START_TIME = time.time()
-MARKET_TIMEOUT_SECONDS = 20
+MARKET_TIMEOUT_SECONDS = 40
 
 
 def run_scraper_with_timeout(scraper, product, limit, market_name):
