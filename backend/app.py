@@ -2,8 +2,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
 import json
+import re
 import time
 import traceback
+import unicodedata
 
 from scraper import ZONES, SCRAPERS, MARKET_NAMES
 
@@ -13,6 +15,122 @@ CORS(app)
 
 START_TIME = time.time()
 MARKET_TIMEOUT_SECONDS = 40
+
+# Palabras que no sirven para medir relevancia.
+# Incluye artículos y conectores comunes para evitar falsos positivos como "de".
+IGNORED_SEARCH_WORDS = {
+    "el", "la", "los", "las", "lo",
+    "un", "una", "unos", "unas",
+    "al", "del",
+    "de", "y", "o", "para", "por", "con", "sin",
+    "en", "a"
+}
+
+
+def normalize_text(value):
+    """
+    Normaliza texto para comparar búsquedas/productos:
+    - minúsculas
+    - sin tildes
+    - espacios limpios
+    """
+    if not value:
+        return ""
+
+    text = str(value).lower().strip()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(
+        char for char in text
+        if unicodedata.category(char) != "Mn"
+    )
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
+def normalize_search_input(value):
+    return normalize_text(value)
+
+
+def get_search_terms(query):
+    normalized_query = normalize_text(query)
+
+    return [
+        word for word in normalized_query.split()
+        if word not in IGNORED_SEARCH_WORDS and len(word) > 1
+    ]
+
+
+def product_matches_search_terms(product_name, search_terms):
+    if not search_terms:
+        return True
+
+    normalized_product_name = normalize_text(product_name)
+    product_words = normalized_product_name.split()
+    product_word_set = set(product_words)
+
+    for term in search_terms:
+        if term in product_word_set:
+            return True
+
+        if len(term) >= 4:
+            for product_word in product_words:
+                if len(product_word) >= 4 and (
+                    product_word.startswith(term) or term.startswith(product_word)
+                ):
+                    return True
+
+    return False
+
+
+def filter_irrelevant_results(query, results):
+    search_terms = get_search_terms(query)
+
+    if not search_terms:
+        return results, []
+
+    valid_results = []
+    omitted_by_market = {}
+
+    for item in results:
+        product_name = item.get("product_name", "")
+        supermarket = item.get("supermarket", "Supermercado")
+
+        if product_matches_search_terms(product_name, search_terms):
+            valid_results.append(item)
+            continue
+
+        if supermarket not in omitted_by_market:
+            omitted_by_market[supermarket] = {
+                "count": 0,
+                "examples": []
+            }
+
+        omitted_by_market[supermarket]["count"] += 1
+
+        if product_name and len(omitted_by_market[supermarket]["examples"]) < 3:
+            omitted_by_market[supermarket]["examples"].append(product_name)
+
+    warnings = []
+
+    for supermarket, info in omitted_by_market.items():
+        examples = info["examples"]
+        examples_text = ""
+
+        if examples:
+            examples_text = " Ejemplos omitidos: " + "; ".join(examples) + "."
+
+        warnings.append({
+            "supermarket": supermarket,
+            "message": (
+                f"Se omitieron {info['count']} producto(s) porque no contenían "
+                "ninguna palabra relevante de la búsqueda. Probablemente eran "
+                f"resultados random del supermercado.{examples_text}"
+            )
+        })
+
+    return valid_results, warnings
 
 
 def run_scraper_with_timeout(scraper, product, limit, market_name):
@@ -47,13 +165,20 @@ def sse_event(event_name, data):
 
 
 def build_final_response(product, zone, results, errors):
+    filtered_results, relevance_warnings = filter_irrelevant_results(
+        query=product,
+        results=results
+    )
+
+    final_errors = errors + relevance_warnings
+
     products_with_price = [
-        item for item in results
+        item for item in filtered_results
         if item.get("price") is not None
     ]
 
     products_without_price = [
-        item for item in results
+        item for item in filtered_results
         if item.get("price") is None
     ]
 
@@ -67,12 +192,13 @@ def build_final_response(product, zone, results, errors):
 
     return {
         "query": product,
+        "normalized_query": normalize_search_input(product),
         "zone": zone,
         "zone_name": ZONES[zone]["label"],
         "total_results": len(final_results),
         "cheapest": cheapest,
         "results": final_results,
-        "errors": errors
+        "errors": final_errors
     }
 
 
@@ -196,13 +322,19 @@ def parse_limit(raw_limit):
 
 @app.get("/api/search-stream")
 def search_stream():
-    product = request.args.get("product", "").strip()
+    raw_product = request.args.get("product", "").strip()
+    product = normalize_search_input(raw_product)
     zone = request.args.get("zone", "Q").strip().upper()
     limit = parse_limit(request.args.get("limit", "3"))
 
-    if not product:
+    if not raw_product:
         return jsonify({
             "error": "Tenés que ingresar un producto para buscar."
+        }), 400
+
+    if not get_search_terms(raw_product):
+        return jsonify({
+            "error": "Ingresá al menos una palabra relevante del producto."
         }), 400
 
     if zone not in ZONES:
@@ -293,7 +425,7 @@ def search_stream():
             })
 
         final_response = build_final_response(
-            product=product,
+            product=raw_product,
             zone=zone,
             results=all_results,
             errors=errors
@@ -321,13 +453,19 @@ def search():
     Endpoint simple sin progreso.
     Lo podés dejar por si querés una búsqueda sin SSE.
     """
-    product = request.args.get("product", "").strip()
+    raw_product = request.args.get("product", "").strip()
+    product = normalize_search_input(raw_product)
     zone = request.args.get("zone", "Q").strip().upper()
     limit = parse_limit(request.args.get("limit", "3"))
 
-    if not product:
+    if not raw_product:
         return jsonify({
             "error": "Tenés que ingresar un producto para buscar."
+        }), 400
+
+    if not get_search_terms(raw_product):
+        return jsonify({
+            "error": "Ingresá al menos una palabra relevante del producto."
         }), 400
 
     if zone not in ZONES:
@@ -377,7 +515,7 @@ def search():
 
     return jsonify(
         build_final_response(
-            product=product,
+            product=raw_product,
             zone=zone,
             results=all_results,
             errors=errors

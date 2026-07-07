@@ -3,6 +3,7 @@ import re
 import time
 import uuid
 import traceback
+import unicodedata
 from typing import Dict, List, Optional
 
 from selenium import webdriver
@@ -157,6 +158,28 @@ def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").split()).strip()
 
 
+def normalize_text(value: str) -> str:
+    """
+    Normaliza texto para comparar productos:
+    - minúsculas
+    - sin tildes
+    - espacios limpios
+    """
+    if not value:
+        return ""
+
+    text = str(value).lower().strip()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(
+        char for char in text
+        if unicodedata.category(char) != "Mn"
+    )
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
 def normalize_price(price_text: str) -> Optional[float]:
     if not price_text:
         return None
@@ -179,20 +202,28 @@ def normalize_price(price_text: str) -> Optional[float]:
 
 
 def relevance_score(query: str, product_name: str) -> int:
-    query = query.lower().strip()
-    product_name = product_name.lower().strip()
+    query = normalize_text(query)
+    product_name = normalize_text(product_name)
 
     if not query or not product_name:
         return 0
 
     score = 0
+    product_words = set(product_name.split())
 
     if query in product_name:
         score += 50
 
     for word in query.split():
-        if word in product_name:
+        if word in product_words:
             score += 10
+        elif len(word) >= 4:
+            for product_word in product_words:
+                if len(product_word) >= 4 and (
+                    product_word.startswith(word) or word.startswith(product_word)
+                ):
+                    score += 6
+                    break
 
     return score
 
