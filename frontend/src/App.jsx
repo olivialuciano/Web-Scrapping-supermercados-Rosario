@@ -317,7 +317,7 @@ function App() {
           <div className="hero-stats">
             <article>
               <span>01</span>
-              <strong>Ranking inteligente</strong>
+              <strong>Ranking</strong>
               <p>
                 Los resultados se ordenan automáticamente desde el precio más
                 bajo hasta el más alto.
