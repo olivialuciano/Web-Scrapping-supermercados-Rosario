@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import time
 import uuid
 import traceback
@@ -8,7 +7,6 @@ from typing import Dict, List, Optional
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 import helium as he
@@ -20,18 +18,21 @@ HEADLESS = True
 def build_chrome_options():
     options = Options()
 
-    chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
+    chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
     options.binary_location = chrome_binary
 
     unique_id = str(uuid.uuid4())
     user_data_dir = f"/tmp/chrome-user-data-{unique_id}"
+    cache_dir = f"/tmp/chrome-cache-{unique_id}"
 
     os.makedirs(user_data_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
 
     if HEADLESS:
         options.add_argument("--headless=new")
 
     options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument(f"--disk-cache-dir={cache_dir}")
 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -42,28 +43,27 @@ def build_chrome_options():
     options.add_argument("--window-size=1366,900")
     options.add_argument("--lang=es-AR")
 
-    options.add_argument("--remote-debugging-pipe")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
 
     return options
 
 def start_market_browser(url: str):
-    chromedriver_path = os.environ.get(
-        "CHROMEDRIVER_PATH",
-        "/usr/bin/chromedriver"
-    )
-
-    service = Service(
-        executable_path=chromedriver_path,
-        service_args=["--verbose"],
-        log_output=sys.stdout
-    )
-
     driver = webdriver.Chrome(
-        service=service,
         options=build_chrome_options()
     )
 
     he.set_driver(driver)
+
+    driver.set_window_size(1366, 900)
 
     try:
         driver.execute_cdp_cmd(

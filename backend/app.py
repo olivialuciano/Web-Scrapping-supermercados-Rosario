@@ -63,16 +63,37 @@ def debug_chrome():
     import subprocess
     import traceback
 
+    info = {
+        "chrome_bin": os.environ.get("CHROME_BIN"),
+        "home": os.environ.get("HOME")
+    }
+
     try:
-        chromium_version = subprocess.check_output(
-            ["chromium", "--version"],
-            text=True
+        chrome_bin = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
+
+        chrome_version = subprocess.check_output(
+            [chrome_bin, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT
         ).strip()
 
-        chromedriver_version = subprocess.check_output(
-            ["chromedriver", "--version"],
-            text=True
-        ).strip()
+        info["chrome_version"] = chrome_version
+
+        standalone_test = subprocess.check_output(
+            [
+                chrome_bin,
+                "--headless=new",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--dump-dom",
+                "https://example.com"
+            ],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=40
+        )
+
+        info["standalone_chrome_ok"] = "Example Domain" in standalone_test
 
         driver = start_market_browser("https://example.com")
         title = driver.title
@@ -81,11 +102,8 @@ def debug_chrome():
 
         return jsonify({
             "status": "ok",
-            "chromium_version": chromium_version,
-            "chromedriver_version": chromedriver_version,
             "title": title,
-            "chrome_bin": os.environ.get("CHROME_BIN"),
-            "chromedriver_path": os.environ.get("CHROMEDRIVER_PATH")
+            **info
         })
 
     except Exception as error:
@@ -95,10 +113,9 @@ def debug_chrome():
             "status": "error",
             "message": str(error),
             "trace": traceback.format_exc(),
-            "chrome_bin": os.environ.get("CHROME_BIN"),
-            "chromedriver_path": os.environ.get("CHROMEDRIVER_PATH")
+            **info
         }), 500
-
+        
 @app.get("/api/zones")
 def get_zones():
     return jsonify({
