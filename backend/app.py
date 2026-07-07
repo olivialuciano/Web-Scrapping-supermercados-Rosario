@@ -1,6 +1,7 @@
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
 import json
+import time
 import traceback
 
 from scraper import ZONES, SCRAPERS, MARKET_NAMES
@@ -8,6 +9,9 @@ from scraper import ZONES, SCRAPERS, MARKET_NAMES
 
 app = Flask(__name__)
 CORS(app)
+
+
+START_TIME = time.time()
 
 
 def sse_event(event_name, data):
@@ -49,13 +53,47 @@ def build_final_response(product, zone, results, errors):
     }
 
 
+@app.get("/")
+def home():
+    return jsonify({
+        "status": "ok",
+        "message": "SuperRos API funcionando",
+        "endpoints": [
+            "/api/health",
+            "/api/warmup",
+            "/api/zones",
+            "/api/search",
+            "/api/search-stream",
+            "/api/debug/chrome"
+        ]
+    })
+
+
 @app.get("/api/health")
 def health():
     return jsonify({
         "status": "ok",
         "message": "API de supermercados funcionando"
     })
-    
+
+
+@app.get("/api/warmup")
+def warmup():
+    """
+    Endpoint liviano para que el frontend despierte Render apenas carga la web.
+    No abre Chrome ni ejecuta scraping: solo responde rápido y mantiene viva la API.
+    """
+    uptime_seconds = round(time.time() - START_TIME, 2)
+
+    return jsonify({
+        "status": "ok",
+        "message": "API despierta",
+        "uptime_seconds": uptime_seconds,
+        "available_zones": list(ZONES.keys()),
+        "available_markets": list(MARKET_NAMES.values())
+    })
+
+
 @app.get("/api/debug/chrome")
 def debug_chrome():
     from scraper import start_market_browser, safe_kill_browser
@@ -115,7 +153,8 @@ def debug_chrome():
             "trace": traceback.format_exc(),
             **info
         }), 500
-        
+
+
 @app.get("/api/zones")
 def get_zones():
     return jsonify({
@@ -299,4 +338,4 @@ def search():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, threaded=True)
+    app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)

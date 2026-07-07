@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -47,12 +47,28 @@ function App() {
   const [limit, setLimit] = useState(3);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
+  const [currentMarket, setCurrentMarket] = useState("");
   const [finishedMarkets, setFinishedMarkets] = useState(0);
   const [totalMarkets, setTotalMarkets] = useState(0);
   const progressIntervalRef = useRef(null);
   const progressValueRef = useRef(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`${API_URL}/api/warmup`, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    }).catch(() => {
+      // Silencioso: solo sirve para despertar Render.
+    });
+
+    return () => controller.abort();
+  }, []);
 
   const cheapestId = useMemo(() => {
     if (!data?.cheapest) return null;
@@ -102,14 +118,17 @@ function App() {
     const trimmedProduct = product.trim();
 
     if (!trimmedProduct) {
+      setErrorMessage("Ingresá un producto para buscar.");
       return;
     }
 
     setLoading(true);
+    setErrorMessage("");
     setData(null);
 
     setProgressImmediately(0);
     setProgressMessage("Preparando búsqueda...");
+    setCurrentMarket("");
     setFinishedMarkets(0);
     setTotalMarkets(0);
 
@@ -131,6 +150,7 @@ function App() {
       const total = payload.total_markets ?? 0;
 
       setProgressMessage(payload.message ?? "");
+      setCurrentMarket(payload.current_market ?? "");
       setFinishedMarkets(finished);
       setTotalMarkets(total);
 
@@ -167,6 +187,10 @@ function App() {
     });
 
     eventSource.onerror = () => {
+      setErrorMessage(
+        "Ocurrió un error al conectar con el backend de scraping.",
+      );
+
       setLoading(false);
       eventSource.close();
       stopProgressAnimation();
@@ -175,7 +199,7 @@ function App() {
 
   return (
     <main className="page">
-      <section className="results-section">
+      <section className="site-frame">
         <header className="topbar">
           <div className="brand">
             <div className="brand-mark">
@@ -206,7 +230,7 @@ function App() {
             <p className="hero-description">
               Buscá un producto, elegí una zona y mirá un ranking visual de
               opciones ordenadas de más barato a más caro, con imagen, detalle
-              del producto y nombre del supermercado.
+              del producto y supermercado.
             </p>
           </section>
 
@@ -233,7 +257,6 @@ function App() {
             </article>
           </aside>
         </section>
-        <br />
 
         <section className="search-zone">
           <form className="search-card" onSubmit={handleSubmit}>
@@ -283,8 +306,6 @@ function App() {
             </button>
           </form>
 
-          <br />
-
           <div className="hero-inline-info">
             <article className="inline-chip chip-yellow">
               Precio + imagen + detalle de producto
@@ -315,7 +336,11 @@ function App() {
         </section>
       </section>
 
-      {(loading || data) && (
+      {errorMessage && (
+        <section className="message error">{errorMessage}</section>
+      )}
+
+      {loading && (
         <section className="loading-card">
           <div className="loading-content">
             <div className="loading-header">

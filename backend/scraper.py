@@ -6,13 +6,19 @@ import traceback
 from typing import Dict, List, Optional
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 import helium as he
 
 
 HEADLESS = True
+DEFAULT_TIMEOUT = 22
+RESULTS_TIMEOUT = 24
+SHORT_TIMEOUT = 3
 
 
 def build_chrome_options():
@@ -20,6 +26,7 @@ def build_chrome_options():
 
     chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
     options.binary_location = chrome_binary
+    options.page_load_strategy = "eager"
 
     unique_id = str(uuid.uuid4())
     user_data_dir = f"/tmp/chrome-user-data-{unique_id}"
@@ -56,6 +63,7 @@ def build_chrome_options():
 
     return options
 
+
 def start_market_browser(url: str):
     driver = webdriver.Chrome(
         options=build_chrome_options()
@@ -64,6 +72,8 @@ def start_market_browser(url: str):
     he.set_driver(driver)
 
     driver.set_window_size(1366, 900)
+    driver.set_page_load_timeout(45)
+    driver.implicitly_wait(0)
 
     try:
         driver.execute_cdp_cmd(
@@ -80,6 +90,7 @@ def start_market_browser(url: str):
         pass
 
     driver.get(url)
+    wait_for_dom_ready(timeout=12)
 
     return driver
 
@@ -219,6 +230,102 @@ def extract_background_image_url(style: str) -> str:
     return match.group(1).strip()
 
 
+def get_driver():
+    return he.get_driver()
+
+
+def wait_for_dom_ready(timeout: int = 12):
+    try:
+        driver = get_driver()
+        WebDriverWait(driver, timeout).until(
+            lambda current_driver: current_driver.execute_script(
+                "return document.readyState"
+            ) in ["interactive", "complete"]
+        )
+    except Exception:
+        pass
+
+
+def wait_for_css(selector: str, timeout: int = DEFAULT_TIMEOUT):
+    driver = get_driver()
+
+    return WebDriverWait(driver, timeout).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+    )
+
+
+def wait_for_clickable_css(selector: str, timeout: int = DEFAULT_TIMEOUT):
+    driver = get_driver()
+
+    return WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+    )
+
+
+def wait_for_any_css(selectors: List[str], timeout: int = DEFAULT_TIMEOUT):
+    driver = get_driver()
+
+    def find_any(current_driver):
+        for selector in selectors:
+            elements = current_driver.find_elements(By.CSS_SELECTOR, selector)
+
+            if elements:
+                return elements[0]
+
+        return False
+
+    return WebDriverWait(driver, timeout).until(find_any)
+
+
+def wait_for_result_count(
+    selector: str,
+    min_count: int = 1,
+    timeout: int = RESULTS_TIMEOUT
+) -> bool:
+    driver = get_driver()
+
+    def has_results(current_driver):
+        elements = current_driver.find_elements(By.CSS_SELECTOR, selector)
+        visible_elements = [element for element in elements if element.is_displayed()]
+
+        return len(visible_elements) >= min_count
+
+    WebDriverWait(driver, timeout).until(has_results)
+    return True
+
+
+def wait_for_results_or_continue(selector: str, timeout: int = RESULTS_TIMEOUT) -> bool:
+    try:
+        return wait_for_result_count(selector, min_count=1, timeout=timeout)
+    except TimeoutException:
+        return False
+
+
+def get_selector_text(selector: str, index: int) -> str:
+    try:
+        driver = get_driver()
+        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+
+        if index >= len(elements):
+            return ""
+
+        return elements[index].text
+    except Exception:
+        return ""
+
+
+def write_search_and_submit(search_input, product: str):
+    he.click(search_input)
+
+    try:
+        search_input.web_element.clear()
+    except Exception:
+        pass
+
+    he.write(product, into=search_input)
+    he.press(he.ENTER)
+
+
 def get_image_src_from_element(element) -> str:
     image_attributes = [
         "currentSrc",
@@ -281,7 +388,7 @@ def find_product_image_url(
     image_selectors = image_selectors or []
 
     try:
-        driver = he.get_driver()
+        driver = get_driver()
     except Exception:
         return ""
 
@@ -350,18 +457,9 @@ def safe_kill_browser():
         pass
 
 
-def wait_selector(selector: str, timeout: int = 20):
-    he.wait_until(lambda: he.S(selector).exists(), timeout_secs=timeout)
+def wait_selector(selector: str, timeout: int = DEFAULT_TIMEOUT):
+    wait_for_css(selector, timeout=timeout)
     return he.S(selector)
-
-
-def get_selector_text(selector: str, index: int) -> str:
-    elements = he.find_all(he.S(selector))
-
-    if index >= len(elements):
-        return ""
-
-    return elements[index].web_element.text
 
 
 def close_cookies_banner():
@@ -374,11 +472,11 @@ def close_cookies_banner():
 
     for selector in selectors:
         try:
+            wait_for_clickable_css(selector, timeout=SHORT_TIMEOUT)
             button = he.S(selector)
 
             if button.exists():
                 he.click(button)
-                time.sleep(1)
                 return
 
         except Exception:
@@ -392,15 +490,12 @@ def scrape_la_gallega(product: str, limit: int = 3) -> List[Dict]:
 
     try:
         start_market_browser(url)
-        time.sleep(6)
         close_cookies_banner()
 
         search_input = wait_selector("#cpoBuscar")
-        he.click(search_input)
-        he.write(product, into=search_input)
-        he.press(he.ENTER)
+        write_search_and_submit(search_input, product)
 
-        time.sleep(5)
+        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -449,15 +544,12 @@ def scrape_la_reina(product: str, limit: int = 3) -> List[Dict]:
 
     try:
         start_market_browser(url)
-        time.sleep(6)
         close_cookies_banner()
 
         search_input = wait_selector("#cpoBuscar")
-        he.click(search_input)
-        he.write(product, into=search_input)
-        he.press(he.ENTER)
+        write_search_and_submit(search_input, product)
 
-        time.sleep(5)
+        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -506,15 +598,12 @@ def scrape_dar(product: str, limit: int = 3) -> List[Dict]:
 
     try:
         start_market_browser(url)
-        time.sleep(6)
         close_cookies_banner()
 
         search_input = wait_selector("#cpoBuscar")
-        he.click(search_input)
-        he.write(product, into=search_input)
-        he.press(he.ENTER)
+        write_search_and_submit(search_input, product)
 
-        time.sleep(5)
+        wait_for_results_or_continue(".desc", timeout=RESULTS_TIMEOUT)
 
         for index in range(limit):
             product_name = get_selector_text(".desc", index)
@@ -563,16 +652,18 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
 
     try:
         start_market_browser(url)
-        time.sleep(8)
         close_cookies_banner()
 
         search_input = wait_selector("#cio-autocomplete-0-input")
-        he.write(product, into=search_input)
-        he.press(he.ENTER)
+        write_search_and_submit(search_input, product)
 
-        time.sleep(8)
-        he.scroll_down(400)
-        he.scroll_down(400)
+        wait_for_results_or_continue(".nombre-producto", timeout=RESULTS_TIMEOUT)
+
+        try:
+            he.scroll_down(400)
+            he.scroll_down(400)
+        except Exception:
+            pass
 
         for index in range(limit):
             product_name = get_selector_text(".nombre-producto", index)
@@ -620,16 +711,21 @@ def scrape_jumbo(product: str, limit: int = 3) -> List[Dict]:
 
     try:
         start_market_browser(url)
-        time.sleep(8)
         close_cookies_banner()
 
         search_input = wait_selector(".vtex-styleguide-9-x-input")
-        he.write(product, into=search_input)
-        he.press(he.ENTER)
+        write_search_and_submit(search_input, product)
 
-        time.sleep(8)
-        he.scroll_down(400)
-        he.scroll_down(400)
+        wait_for_results_or_continue(
+            ".vtex-product-summary-2-x-productBrand",
+            timeout=RESULTS_TIMEOUT
+        )
+
+        try:
+            he.scroll_down(400)
+            he.scroll_down(400)
+        except Exception:
+            pass
 
         for index in range(limit):
             product_name = get_selector_text(
