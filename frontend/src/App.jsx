@@ -187,10 +187,6 @@ function App() {
     });
 
     eventSource.onerror = () => {
-      setErrorMessage(
-        "Ocurrió un error al conectar con el backend de scraping.",
-      );
-
       setLoading(false);
       eventSource.close();
       stopProgressAnimation();
