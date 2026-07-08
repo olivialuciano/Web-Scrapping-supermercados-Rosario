@@ -392,11 +392,10 @@ def search_stream():
                 continue
 
             try:
-                market_results = run_scraper_with_timeout(
-                    scraper=scraper,
-                    product=product,
+                market_results = scraper(
+                    product,
                     limit=limit,
-                    market_name=market_name
+                    close_browser=False
                 )
 
                 all_results.extend(market_results)
@@ -423,6 +422,12 @@ def search_stream():
                 "finished_markets": index + 1,
                 "total_markets": total_markets
             })
+            
+        try:
+            from scraper import safe_kill_browser
+            safe_kill_browser()
+        except Exception:
+            pass
 
         final_response = build_final_response(
             product=raw_product,
@@ -491,11 +496,10 @@ def search():
             continue
 
         try:
-            market_results = run_scraper_with_timeout(
-                scraper=scraper,
-                product=product,
+            market_results = scraper(
+                product,
                 limit=limit,
-                market_name=market_name
+                close_browser=False
             )
 
             all_results.extend(market_results)
@@ -512,6 +516,12 @@ def search():
                 "message": str(error),
                 "trace": traceback.format_exc()
             })
+            
+    try:
+        from scraper import safe_kill_browser
+        safe_kill_browser()
+    except Exception:
+        pass
 
     return jsonify(
         build_final_response(

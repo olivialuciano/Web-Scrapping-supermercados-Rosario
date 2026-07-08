@@ -15,7 +15,7 @@ from selenium.webdriver.common.keys import Keys
 import helium as he
 
 
-HEADLESS = False
+HEADLESS = True
 
 MARKET_TIMEOUT_SECONDS = 40
 PAGE_LOAD_TIMEOUT_SECONDS = 7
@@ -29,12 +29,29 @@ def build_chrome_options():
     options = Options()
     options.page_load_strategy = "eager"
 
-    chrome_binary = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
-    options.binary_location = chrome_binary
+    chrome_binary = os.environ.get("CHROME_BIN")
+
+    if chrome_binary and os.path.exists(chrome_binary):
+        options.binary_location = chrome_binary
+    else:
+        linux_chrome_path = "/usr/bin/google-chrome"
+
+        if os.path.exists(linux_chrome_path):
+            options.binary_location = linux_chrome_path
 
     unique_id = str(uuid.uuid4())
     user_data_dir = f"/tmp/chrome-user-data-{unique_id}"
     cache_dir = f"/tmp/chrome-cache-{unique_id}"
+
+    if os.name == "nt":
+        user_data_dir = os.path.join(
+            os.environ.get("TEMP", "."),
+            f"chrome-user-data-{unique_id}"
+        )
+        cache_dir = os.path.join(
+            os.environ.get("TEMP", "."),
+            f"chrome-cache-{unique_id}"
+        )
 
     os.makedirs(user_data_dir, exist_ok=True)
     os.makedirs(cache_dir, exist_ok=True)
@@ -81,10 +98,20 @@ def build_chrome_options():
     return options
 
 
-def start_market_browser(url: str):
-    driver = webdriver.Chrome(options=build_chrome_options())
-    he.set_driver(driver)
+def get_active_driver():
+    try:
+        driver = he.get_driver()
 
+        # Fuerza una interacción mínima para saber si sigue vivo.
+        _ = driver.current_url
+
+        return driver
+
+    except Exception:
+        return None
+
+
+def configure_driver_once(driver):
     driver.set_window_size(1366, 900)
     driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
     driver.set_script_timeout(5)
@@ -102,6 +129,15 @@ def start_market_browser(url: str):
         )
     except Exception:
         pass
+
+
+def start_market_browser(url: str):
+    driver = get_active_driver()
+
+    if driver is None:
+        driver = webdriver.Chrome(options=build_chrome_options())
+        he.set_driver(driver)
+        configure_driver_once(driver)
 
     try:
         driver.get(url)
@@ -542,7 +578,7 @@ def build_result(
     }
 
 
-def scrape_la_gallega(product: str, limit: int = 3) -> List[Dict]:
+def scrape_la_gallega(product: str, limit: int = 3, close_browser: bool = True) -> List[Dict]:
     supermarket = "La Gallega"
     url = "https://www.lagallega.com.ar/login.asp"
     results = []
@@ -593,12 +629,13 @@ def scrape_la_gallega(product: str, limit: int = 3) -> List[Dict]:
                 )
 
     finally:
-        safe_kill_browser()
+        if close_browser:
+            safe_kill_browser()
 
     return results
 
 
-def scrape_la_reina(product: str, limit: int = 3) -> List[Dict]:
+def scrape_la_reina(product: str, limit: int = 3, close_browser: bool = True) -> List[Dict]:
     supermarket = "La Reina"
     url = "https://www.lareinaonline.com.ar/"
     results = []
@@ -649,12 +686,13 @@ def scrape_la_reina(product: str, limit: int = 3) -> List[Dict]:
                 )
 
     finally:
-        safe_kill_browser()
+        if close_browser:
+            safe_kill_browser()
 
     return results
 
 
-def scrape_dar(product: str, limit: int = 3) -> List[Dict]:
+def scrape_dar(product: str, limit: int = 3, close_browser: bool = True) -> List[Dict]:
     supermarket = "Dar"
     url = "https://darentucasa.com.ar/carrito.asp"
     results = []
@@ -705,12 +743,13 @@ def scrape_dar(product: str, limit: int = 3) -> List[Dict]:
                 )
 
     finally:
-        safe_kill_browser()
+        if close_browser:
+            safe_kill_browser()
 
     return results
 
 
-def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
+def scrape_coto(product: str, limit: int = 3, close_browser: bool = True) -> List[Dict]:
     supermarket = "Coto"
     results = []
 
@@ -741,7 +780,7 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
         wait_for_results([".nombre-producto", ".card-title"], deadline)
 
         try:
-            he.scroll_down(400)
+            he.scroll_down(250)
         except Exception:
             pass
 
@@ -762,10 +801,7 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
                     "article",
                 ],
                 image_selectors=[
-                    ".product-image",
-                    ".product-image img",
-                    "article img",
-                    "img",
+                    ".product-image"
                 ]
             )
 
@@ -782,12 +818,13 @@ def scrape_coto(product: str, limit: int = 3) -> List[Dict]:
                 )
 
     finally:
-        safe_kill_browser()
+        if close_browser:
+            safe_kill_browser()
 
     return results
 
 
-def scrape_jumbo(product: str, limit: int = 3) -> List[Dict]:
+def scrape_jumbo(product: str, limit: int = 3, close_browser: bool = True) -> List[Dict]:
     supermarket = "Jumbo"
     results = []
 
@@ -859,7 +896,8 @@ def scrape_jumbo(product: str, limit: int = 3) -> List[Dict]:
                 )
 
     finally:
-        safe_kill_browser()
+        if close_browser:
+            safe_kill_browser()
 
     return results
 
