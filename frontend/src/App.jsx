@@ -3,12 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const API_URL = import.meta.env.VITE_API_URL;
 
 const zones = [
-  { value: "Q", label: "Cualquier zona" },
-  { value: "C", label: "Centro" },
-  { value: "S", label: "Sur" },
-  { value: "O", label: "Oeste" },
-  { value: "F", label: "Fisherton" },
-  { value: "N", label: "Norte" },
+  { value: "C", label: "Centro [La Gallega, Coto, Dar]" },
+  { value: "S", label: "Sur [La Reina, Dar]" },
+  { value: "O", label: "Oeste [Coto, Dar]" },
+  { value: "F", label: "Fisherton [La Gallega, Coto]" },
+  { value: "N", label: "Norte [La Gallega, Coto, Jumbo]" },
 ];
 
 function formatPrice(price) {
@@ -196,16 +195,6 @@ function App() {
   return (
     <main className="page">
       <section className="site-frame">
-        <header className="topbar">
-          <div className="brand">
-            <div className="brand-mark">
-              <span />
-              <span />
-            </div>
-            <strong>SuperRos</strong>
-          </div>
-        </header>
-
         <section className="hero-layout">
           <section className="hero-main">
             <div className="review-pill">
@@ -228,12 +217,29 @@ function App() {
               opciones ordenadas de más barato a más caro, con imagen, detalle
               del producto y supermercado.
             </p>
+            <div className="hero-stats">
+              <article>
+                <strong>Ranking</strong>
+                <p>
+                  Los resultados se ordenan automáticamente desde el precio más
+                  bajo hasta el más alto.
+                </p>
+              </article>
+
+              <article>
+                <strong>Comparación visual</strong>
+                <p>
+                  Ves producto, supermercado, imagen y precio en una misma
+                  tarjeta.
+                </p>
+              </article>
+            </div>
           </section>
 
           <aside className="hero-showcase" aria-label="Panel visual">
             <article className="showcase-card showcase-primary">
               <div className="showcase-top">
-                <span className="showcase-label">live ranking</span>
+                <span className="showcase-label">ranking en vivo</span>
                 <span className="showcase-badge">Rosario</span>
               </div>
 
@@ -242,6 +248,7 @@ function App() {
                 <div className="blob blob-yellow" />
                 <div className="blob blob-outline" />
               </div>
+              <br />
 
               <div className="showcase-copy">
                 <h3>Compará en segundos dónde conviene comprar</h3>
@@ -249,11 +256,11 @@ function App() {
                   Una forma más visual, simple y rápida de revisar precios sin
                   descargar archivos.
                 </p>
+                <br />
               </div>
             </article>
           </aside>
         </section>
-
         <section className="search-zone">
           <form className="search-card" onSubmit={handleSubmit}>
             <div className="field field-large">
@@ -301,35 +308,8 @@ function App() {
               <span>→</span>
             </button>
           </form>
-
-          <div className="hero-inline-info">
-            <article className="inline-chip chip-yellow">
-              Precio + imagen + detalle de producto
-            </article>
-            <article className="inline-chip">Ranking automático</article>
-            <article className="inline-chip">Scraping en vivo</article>
-          </div>
-
-          <div className="hero-stats">
-            <article>
-              <span>01</span>
-              <strong>Ranking</strong>
-              <p>
-                Los resultados se ordenan automáticamente desde el precio más
-                bajo hasta el más alto.
-              </p>
-            </article>
-
-            <article>
-              <span>02</span>
-              <strong>Comparación visual</strong>
-              <p>
-                Ves producto, supermercado, imagen y precio en una misma
-                tarjeta.
-              </p>
-            </article>
-          </div>
         </section>
+        <br />
       </section>
 
       {errorMessage && (

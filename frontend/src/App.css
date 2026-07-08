@@ -181,7 +181,7 @@ h1 {
   margin: 0;
   font-size: clamp(3rem, 5.2vw, 6.2rem);
   line-height: 0.95;
-  letter-spacing: -0.09em;
+  letter-spacing: -0.06em;
   font-weight: 900;
 }
 
@@ -290,24 +290,24 @@ h1 {
 }
 
 .blob-orange {
-  width: 132px;
-  height: 132px;
+  width: 182px;
+  height: 182px;
   top: 12px;
   right: 62px;
   background: var(--orange);
 }
 
 .blob-yellow {
-  width: 98px;
-  height: 98px;
+  width: 148px;
+  height: 148px;
   top: 44px;
   right: 0;
   background: var(--yellow);
 }
 
 .blob-outline {
-  width: 168px;
-  height: 168px;
+  width: 218px;
+  height: 218px;
   top: -2px;
   right: 22px;
   background: transparent;
@@ -342,7 +342,7 @@ h1 {
   align-items: stretch;
   overflow: hidden;
   border: 2px solid var(--line);
-  border-radius: 999px;
+  border-radius: 28px;
   background: var(--white);
   box-shadow: 0 10px 0 rgba(0, 0, 0, 0.04);
   text-align: left;
