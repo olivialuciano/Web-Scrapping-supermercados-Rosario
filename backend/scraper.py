@@ -555,6 +555,35 @@ def find_product_image_url(
 
     return ""
 
+def wait_for_product_image_url(
+    index: int,
+    base_url: str,
+    deadline,
+    card_selectors: Optional[List[str]] = None,
+    image_selectors: Optional[List[str]] = None,
+    timeout: float = 4
+) -> str:
+    end_time = time.monotonic() + remaining_time(deadline, timeout)
+
+    while time.monotonic() < end_time:
+        image_url = find_product_image_url(
+            index=index,
+            base_url=base_url,
+            card_selectors=card_selectors,
+            image_selectors=image_selectors
+        )
+
+        if image_url:
+            return image_url
+
+        try:
+            he.scroll_down(220)
+        except Exception:
+            pass
+
+        time.sleep(POLL_SECONDS)
+
+    return ""
 
 def build_result(
     supermarket: str,
@@ -788,21 +817,15 @@ def scrape_coto(product: str, limit: int = 3, close_browser: bool = True) -> Lis
             product_name = get_selector_text(".nombre-producto", index)
             product_price = get_selector_text(".card-title", index)
 
-            image_url = find_product_image_url(
+            
+            
+            image_url = wait_for_product_image_url(
                 index=index,
                 base_url=url,
-                card_selectors=[
-                    ".card",
-                    ".card-product",
-                    ".product-card",
-                    ".producto",
-                    ".product",
-                    ".item",
-                    "article",
-                ],
-                image_selectors=[
-                    ".product-image"
-                ]
+                deadline=deadline,
+                card_selectors=".card-container",
+                image_selectors=".product-image",
+                timeout=4
             )
 
             if product_name:
