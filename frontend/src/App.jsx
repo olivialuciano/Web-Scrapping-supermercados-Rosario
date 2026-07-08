@@ -42,7 +42,7 @@ function ProductImage({ src, alt }) {
 
 function App() {
   const [product, setProduct] = useState("");
-  const [zone, setZone] = useState("Q");
+  const [zone, setZone] = useState("C");
   const [limit, setLimit] = useState(3);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
